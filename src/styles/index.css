@@ -1,9 +1,14 @@
 @import 'tailwindcss';
 
 :root {
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Dark theme (default) */
   --bg-chamber: #090d12;
   --bg-panel: #111720;
   --bg-well: #17202c;
+  --bg-well-hover: #202d3d;
   --border-subtle: #243142;
   --border-control: #586e87;
   --ink-primary: #edf2f7;
@@ -11,9 +16,34 @@
   --accent-emerald: #3dd6a4;
   --accent-emerald-ink: #090d12;
   --peak-amber: #f4a940;
+  --slider-track-bg: #2b3a4d;
+  --slider-thumb-bg: #edf2f7;
+  --polar-ring: #2e3f53;
+  --polar-ring-3db: #6f86a0;
+  --polar-axis: #2e3f53;
+  --scenario-active-bg: #162928;
+  --checkbox-accent: var(--accent-emerald);
+}
 
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+[data-theme='light'] {
+  --bg-chamber: #f4f6f8;
+  --bg-panel: #ffffff;
+  --bg-well: #e8ecf0;
+  --bg-well-hover: #dce1e7;
+  --border-subtle: #d0d7e0;
+  --border-control: #9eaab8;
+  --ink-primary: #131920;
+  --ink-secondary: #56626e;
+  --accent-emerald: #1a9e72;
+  --accent-emerald-ink: #ffffff;
+  --peak-amber: #c47e14;
+  --slider-track-bg: #cdd4dc;
+  --slider-thumb-bg: #131920;
+  --polar-ring: #c4ccda;
+  --polar-ring-3db: #8893a4;
+  --polar-axis: #c4ccda;
+  --scenario-active-bg: #d8f3ec;
+  --checkbox-accent: #1a9e72;
 }
 
 @layer base {
@@ -28,14 +58,20 @@
     color: var(--ink-primary);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    color-scheme: dark;
+  }
+
+  [data-theme='light'] {
+    color-scheme: light;
   }
 
   body {
     margin: 0;
-    min-height: 100dvh;
+    height: 100dvh;
     background-color: var(--bg-chamber);
     color: var(--ink-primary);
-    overflow-x: clip;
+    overflow: hidden;
     line-height: 1.55;
   }
 
@@ -96,10 +132,11 @@
 
 /* Shell Layout */
 .lab-shell {
-  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-chamber);
+  overflow: hidden;
 }
 
 /* Header */
@@ -113,6 +150,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px 16px;
+  flex-shrink: 0;
 }
 
 .lab-header-left {
@@ -143,6 +181,31 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-control);
+  background-color: var(--bg-well);
+  color: var(--ink-primary);
+  transition: background-color 150ms ease-out, border-color 150ms ease-out;
+}
+
+.theme-toggle:hover {
+  background-color: var(--bg-well-hover);
+  border-color: var(--accent-emerald);
+}
+
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .header-ext-link {
@@ -176,21 +239,23 @@
 }
 
 .btn-secondary:hover {
-  background-color: #202d3d;
+  background-color: var(--bg-well-hover);
   border-color: var(--accent-emerald);
 }
 
 /* Main Split Workbench (Mobile first -> Tablet -> Desktop >= 1024px) */
 .lab-main {
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 1fr 1fr;
+  overflow: hidden;
 }
 
 .viewport-pane {
   position: relative;
-  height: 46dvh;
-  min-height: 320px;
+  min-height: 0;
   background-color: var(--bg-chamber);
   border-bottom: 1px solid var(--border-subtle);
   overflow: hidden;
@@ -324,6 +389,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .inspector-head {
@@ -507,9 +574,9 @@ input[type='range'].rf-range {
   --slider-thumb-size: 1.15rem;
   --slider-track-radius: 999px;
   --slider-thumb-radius: 50%;
-  --slider-track-color: #2b3a4d;
-  --slider-fill-color: #3dd6a4;
-  --slider-thumb-color: #edf2f7;
+  --slider-track-color: var(--slider-track-bg);
+  --slider-fill-color: var(--accent-emerald);
+  --slider-thumb-color: var(--slider-thumb-bg);
   --slider-progress: calc(
     progress(var(--control-value), var(--attr-min), var(--attr-max)) * 100%
   );
@@ -607,7 +674,7 @@ input[type='range'].rf-range::-moz-range-thumb {
 .check-item input[type='checkbox'] {
   width: 18px;
   height: 18px;
-  accent-color: var(--accent-emerald);
+  accent-color: var(--checkbox-accent);
 }
 
 /* 2D SVG Polar Charts */
@@ -653,19 +720,19 @@ input[type='range'].rf-range::-moz-range-thumb {
 
 .polar-ring {
   fill: none;
-  stroke: #2e3f53;
+  stroke: var(--polar-ring);
   stroke-width: 1;
 }
 
 .polar-ring-3db {
   fill: none;
-  stroke: #6f86a0;
+  stroke: var(--polar-ring-3db);
   stroke-width: 1;
   stroke-dasharray: 3 3;
 }
 
 .polar-axis {
-  stroke: #2e3f53;
+  stroke: var(--polar-axis);
   stroke-width: 1;
 }
 
@@ -674,7 +741,6 @@ input[type='range'].rf-range::-moz-range-thumb {
   font-family: var(--font-mono);
   font-size: 8px;
 }
-
 /* Metrics Grid */
 .metrics-grid {
   margin: 0;
@@ -734,7 +800,7 @@ input[type='range'].rf-range::-moz-range-thumb {
 
 .scenario-btn[aria-pressed='true'] {
   border-color: var(--accent-emerald);
-  background-color: #162928;
+  background-color: var(--scenario-active-bg);
 }
 
 .reset-row {
@@ -758,6 +824,7 @@ input[type='range'].rf-range::-moz-range-thumb {
   gap: 8px 16px;
   font-size: 0.78rem;
   color: var(--ink-secondary);
+  flex-shrink: 0;
 }
 
 .lab-footer p {
@@ -776,10 +843,6 @@ input[type='range'].rf-range::-moz-range-thumb {
 
 /* Tablet Layout (640px .. 1023px) */
 @media (min-width: 640px) {
-  .viewport-pane {
-    height: 54dvh;
-  }
-
   .viewport-hud {
     flex-direction: row;
     align-items: flex-end;
@@ -791,18 +854,11 @@ input[type='range'].rf-range::-moz-range-thumb {
 @media (min-width: 1024px) {
   .lab-main {
     grid-template-columns: minmax(0, 1fr) 400px;
-    height: calc(100dvh - 60px - 44px);
-    min-height: 580px;
+    grid-template-rows: 1fr;
   }
 
   .viewport-pane {
-    height: 100%;
     border-bottom: 0;
     border-right: 1px solid var(--border-subtle);
-  }
-
-  .inspector-pane {
-    height: 100%;
-    overflow: hidden;
   }
 }

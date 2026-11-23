@@ -5,6 +5,7 @@ import {
 } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { PolarPlot2D } from '../components/PolarPlot2D';
+import type { Theme } from '../hooks/useTheme';
 import type {
   AntennaParams,
   ScaleMode,
@@ -30,6 +31,7 @@ interface AntennaLabCanvasProps {
   autoOrbit: boolean;
   prefersReducedMotion: boolean;
   presetRequest: { preset: CameraPresetId; seq: number };
+  theme: Theme;
 }
 
 class CanvasErrorBoundary extends Component<
@@ -61,6 +63,7 @@ export function AntennaLabCanvas({
   autoOrbit,
   prefersReducedMotion,
   presetRequest,
+  theme,
 }: AntennaLabCanvasProps) {
   const [webglCapable, setWebglCapable] = useState(() => isWebGLAvailable());
   const [contextLost, setContextLost] = useState(false);
@@ -70,6 +73,14 @@ export function AntennaLabCanvas({
   const isAnechoic = scenario.id === 'anechoic';
   const feedY = isAnechoic ? 0 : Math.max(1.2, scenario.towerHeightM * METERS_TO_SCENE);
   const lobeRadius = isAnechoic ? 3.4 : 2.9;
+
+  const bgColor = theme === 'dark' ? '#090D12' : '#E8ECF0';
+  const fogColor = theme === 'dark' ? '#090D12' : '#E8ECF0';
+  const hemiSky = theme === 'dark' ? '#B8D0E8' : '#D6E0EA';
+  const hemiGround = theme === 'dark' ? '#111822' : '#B0B8C2';
+  const hemiIntensity = theme === 'dark' ? 0.95 : 1.1;
+  const keyIntensity = theme === 'dark' ? 1.35 : 1.6;
+  const fillIntensity = theme === 'dark' ? 0.7 : 0.85;
 
   const handleRetry = () => {
     setWebglCapable(isWebGLAvailable());
@@ -122,12 +133,12 @@ export function AntennaLabCanvas({
             );
           }}
         >
-          <color attach="background" args={['#090D12']} />
-          <fog attach="fog" args={['#090D12', 24, 65]} />
+          <color attach="background" args={[bgColor]} />
+          <fog attach="fog" args={[fogColor, 24, 65]} />
 
-          <hemisphereLight args={['#B8D0E8', '#111822', 0.95]} />
-          <directionalLight position={[10, 16, 10]} intensity={1.35} color="#FFF4E5" />
-          <directionalLight position={[-10, 8, -8]} intensity={0.7} color="#8AC8EA" />
+          <hemisphereLight args={[hemiSky, hemiGround, hemiIntensity]} />
+          <directionalLight position={[10, 16, 10]} intensity={keyIntensity} color="#FFF4E5" />
+          <directionalLight position={[-10, 8, -8]} intensity={fillIntensity} color="#8AC8EA" />
 
           <AntennaModels3D params={params} feedY={feedY} />
 

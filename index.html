@@ -9,7 +9,19 @@
       content="Interactive 3D RF radiation pattern and propagation laboratory featuring Dipole, Collinear Omni, Yagi-Uda, Patch, Parabolic Dish, and Sectoral BTS antennas with live E/H-plane cuts and terrain shadowing."
     />
     <meta name="theme-color" content="#090D12" />
-    <link rel="icon" href="data:," />
+    <script>
+      // Apply saved theme before first paint to prevent flash
+      (function(){var t;try{t=localStorage.getItem('antennalab-theme')}catch(e){}
+      if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme:light)').matches?'light':'dark';
+      document.documentElement.setAttribute('data-theme',t);
+      var m=document.querySelector('meta[name="theme-color"]');
+      if(m)m.setAttribute('content',t==='dark'?'#090D12':'#F4F6F8');})();
+    </script>
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="16x16 32x32 48x48 64x64 128x128 256x256" />
+    <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/favicon-256.png" type="image/png" sizes="256x256" />
+    <link rel="apple-touch-icon" href="/apple-icon.png" sizes="180x180" type="image/png" />
     <link rel="canonical" href="https://antenna.andresptr.site/" />
     <meta property="og:type" content="website" />
     <meta

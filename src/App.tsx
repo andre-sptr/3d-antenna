@@ -3,6 +3,7 @@ import { InspectorPanel } from './components/InspectorPanel';
 import { LabHeader } from './components/LabHeader';
 import { ViewportOverlay } from './components/ViewportOverlay';
 import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
+import { useTheme } from './hooks/useTheme';
 import {
   DEFAULT_ANTENNA_PARAMS,
   DEFAULT_SCENARIO,
@@ -15,6 +16,7 @@ import type { CameraPresetId } from './scene/CameraRig';
 
 export function App() {
   const prefersReducedMotion = usePrefersReducedMotion();
+  const { theme, toggleTheme } = useTheme();
   const [params, setParams] = useState<AntennaParams>(DEFAULT_ANTENNA_PARAMS);
   const [scenario, setScenario] = useState<ScenarioConfig>(DEFAULT_SCENARIO);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('log');
@@ -53,7 +55,9 @@ export function App() {
       <LabHeader
         params={params}
         autoOrbit={autoOrbit}
+        theme={theme}
         onToggleAutoOrbit={() => setAutoOrbit((prev) => !prev)}
+        onToggleTheme={toggleTheme}
       />
 
       <main className="lab-main">
@@ -69,6 +73,7 @@ export function App() {
             autoOrbit={autoOrbit}
             prefersReducedMotion={prefersReducedMotion}
             presetRequest={presetRequest}
+            theme={theme}
           />
           <ViewportOverlay
             gainDbi={params.gainDbi}
