@@ -1,31 +1,70 @@
 import { useEffect, useMemo, useRef } from 'react';
+import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import {
-  evaluateGroundFieldDbm,
-  groundFieldToRgb,
-  type AntennaParams,
-  type ScenarioConfig,
+import type { Theme } from '../hooks/useTheme';
+import type {
+  AntennaParams,
+  PropagationModel,
+  ScenarioConfig,
 } from '../lib/antennaPhysics';
+import { clampNumber } from '../lib/propagationMath';
+import { fillGroundHeatmapBuffer } from '../lib/propagationPhysics';
 
 interface PropagationEnvironmentProps {
   params: AntennaParams;
   scenario: ScenarioConfig;
+  propagationModel: PropagationModel;
   feedY: number;
   showPolarCage: boolean;
+  theme: Theme;
+  onSelectGroundPoint?: (xMeters: number, zMeters: number) => void;
 }
 
 export const METERS_TO_SCENE = 0.32;
 const GROUND_SIZE_UNITS = 24; // 75m x 75m field span
-const GROUND_SEGMENTS = 64;
+const HEATMAP_TEX_SIZE = 192;
 
 export function PropagationEnvironment({
   params,
   scenario,
+  propagationModel,
   feedY,
   showPolarCage,
+  theme,
+  onSelectGroundPoint,
 }: PropagationEnvironmentProps) {
-  const groundGeoRef = useRef<THREE.PlaneGeometry>(null);
   const ridgeGeoRef = useRef<THREE.PlaneGeometry>(null);
+  const groundTexRef = useRef<THREE.DataTexture>(null);
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+
+  const isLight = theme === 'light';
+  const palette = useMemo(
+    () => ({
+      axisColor: isLight ? '#64748B' : '#475B73',
+      cagePrimary: isLight ? '#1A9E72' : '#3DD6A4',
+      cageSecondary: isLight ? '#64748B' : '#586E87',
+      gridMajor: isLight ? '#94A3B8' : '#33465B',
+      gridMinor: isLight ? '#CBD5E1' : '#1C2836',
+      mastColor: isLight ? '#64748B' : '#7B90A6',
+      baseColor: isLight ? '#94A3B8' : '#273445',
+      buildingWall: isLight ? '#64748B' : '#263344',
+      buildingCap: isLight ? '#94A3B8' : '#586E87',
+      ridgeColor: isLight ? '#5C6F82' : '#202D3D',
+    }),
+    [isLight],
+  );
+
+  const groundTexArgs = useMemo<
+    [Uint8Array, number, number, THREE.PixelFormat]
+  >(
+    () => [
+      new Uint8Array(HEATMAP_TEX_SIZE * HEATMAP_TEX_SIZE * 4),
+      HEATMAP_TEX_SIZE,
+      HEATMAP_TEX_SIZE,
+      THREE.RGBAFormat,
+    ],
+    [],
+  );
 
   const axisLineX = useMemo(() => {
     const geo = new THREE.BufferGeometry().setFromPoints([
@@ -61,6 +100,12 @@ export function PropagationEnvironment({
   }, []);
 
   useEffect(() => {
+    (axisLineX.material as THREE.LineBasicMaterial).color.set(palette.axisColor);
+    (axisLineZ.material as THREE.LineBasicMaterial).color.set(palette.axisColor);
+    (axisLineY.material as THREE.LineBasicMaterial).color.set(palette.axisColor);
+  }, [palette.axisColor, axisLineX, axisLineZ, axisLineY]);
+
+  useEffect(() => {
     return () => {
       axisLineX.geometry.dispose();
       (axisLineX.material as THREE.Material).dispose();
@@ -72,41 +117,22 @@ export function PropagationEnvironment({
   }, [axisLineX, axisLineZ, axisLineY]);
 
   useEffect(() => {
-    if (scenario.id === 'anechoic' || !groundGeoRef.current) {
+    const tex = groundTexRef.current;
+    if (scenario.id === 'anechoic' || !tex) {
       return;
     }
-
-    const posAttr = groundGeoRef.current.getAttribute(
-      'position',
-    ) as THREE.BufferAttribute;
-    let colorAttr = groundGeoRef.current.getAttribute('color') as
-      | THREE.BufferAttribute
-      | undefined;
-
-    if (!colorAttr || colorAttr.count !== posAttr.count) {
-      colorAttr = new THREE.BufferAttribute(
-        new Float32Array(posAttr.count * 3),
-        3,
-      );
-      groundGeoRef.current.setAttribute('color', colorAttr);
-    }
-
-    const colorArray = colorAttr.array as Float32Array;
-    for (let i = 0; i < posAttr.count; i++) {
-      // PlaneGeometry lies in local XY before -90deg X rotation: local X -> world X, local Y -> world -Z
-      const worldXUnits = posAttr.getX(i);
-      const worldZUnits = -posAttr.getY(i);
-      const xMeters = worldXUnits / METERS_TO_SCENE;
-      const zMeters = worldZUnits / METERS_TO_SCENE;
-      const rxDbm = evaluateGroundFieldDbm(params, scenario, xMeters, zMeters);
-      const [r, g, b] = groundFieldToRgb(rxDbm);
-      colorArray[i * 3] = r;
-      colorArray[i * 3 + 1] = g;
-      colorArray[i * 3 + 2] = b;
-    }
-
-    colorAttr.needsUpdate = true;
-  }, [params, scenario]);
+    const data = tex.image.data as Uint8Array;
+    fillGroundHeatmapBuffer(
+      data,
+      HEATMAP_TEX_SIZE,
+      GROUND_SIZE_UNITS,
+      METERS_TO_SCENE,
+      params,
+      scenario,
+      propagationModel,
+    );
+    tex.needsUpdate = true;
+  }, [params, scenario, propagationModel]);
 
   useEffect(() => {
     if (scenario.id !== 'ridge' || !ridgeGeoRef.current) {
@@ -128,6 +154,26 @@ export function PropagationEnvironment({
     ridgeGeoRef.current.computeVertexNormals();
   }, [scenario.id, scenario.obstacleHeightM]);
 
+  const handleGroundPointerDown = (event: ThreeEvent<PointerEvent>) => {
+    pointerDownRef.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const handleGroundPointerUp = (event: ThreeEvent<PointerEvent>) => {
+    const start = pointerDownRef.current;
+    pointerDownRef.current = null;
+    if (!start || !onSelectGroundPoint) {
+      return;
+    }
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 5) {
+      return;
+    }
+    const xMeters =
+      Math.round(clampNumber(event.point.x / METERS_TO_SCENE, -36, 36) * 2) / 2;
+    const zMeters =
+      Math.round(clampNumber(event.point.z / METERS_TO_SCENE, -36, 36) * 2) / 2;
+    onSelectGroundPoint(xMeters, zMeters);
+  };
+
   const obstacleXUnits = scenario.obstacleDistanceM * METERS_TO_SCENE;
   const obstacleHUnits = scenario.obstacleHeightM * METERS_TO_SCENE;
 
@@ -139,27 +185,27 @@ export function PropagationEnvironment({
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
             <ringGeometry args={[3.55, 3.6, 96]} />
             <meshBasicMaterial
-              color="#3DD6A4"
+              color={palette.cagePrimary}
               transparent
-              opacity={0.32}
+              opacity={isLight ? 0.45 : 0.32}
               side={THREE.DoubleSide}
             />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
             <ringGeometry args={[1.78, 1.81, 72]} />
             <meshBasicMaterial
-              color="#586E87"
+              color={palette.cageSecondary}
               transparent
-              opacity={0.35}
+              opacity={isLight ? 0.42 : 0.35}
               side={THREE.DoubleSide}
             />
           </mesh>
           <mesh>
             <ringGeometry args={[3.55, 3.59, 96]} />
             <meshBasicMaterial
-              color="#586E87"
+              color={palette.cageSecondary}
               transparent
-              opacity={0.22}
+              opacity={isLight ? 0.32 : 0.22}
               side={THREE.DoubleSide}
             />
           </mesh>
@@ -172,23 +218,35 @@ export function PropagationEnvironment({
       {/* Field Tower, Ground Signal Heatmap, and Obstacles */}
       {scenario.id !== 'anechoic' && (
         <group>
-          {/* Ground Footprint Coverage Heatmap */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-            <planeGeometry
-              ref={groundGeoRef}
-              args={[
-                GROUND_SIZE_UNITS,
-                GROUND_SIZE_UNITS,
-                GROUND_SEGMENTS,
-                GROUND_SEGMENTS,
-              ]}
-            />
-            <meshBasicMaterial vertexColors transparent opacity={0.86} />
+          {/* High-resolution 192x192 DataTexture Ground Footprint Heatmap */}
+          <mesh
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[0, 0.01, 0]}
+            onPointerDown={handleGroundPointerDown}
+            onPointerUp={handleGroundPointerUp}
+          >
+            <planeGeometry args={[GROUND_SIZE_UNITS, GROUND_SIZE_UNITS, 1, 1]} />
+            <meshBasicMaterial
+              transparent
+              opacity={isLight ? 0.82 : 0.88}
+            >
+              <dataTexture
+                ref={groundTexRef}
+                attach="map"
+                args={groundTexArgs}
+                colorSpace={THREE.SRGBColorSpace}
+                magFilter={THREE.LinearFilter}
+                minFilter={THREE.LinearFilter}
+                generateMipmaps={false}
+                flipY={false}
+              />
+            </meshBasicMaterial>
           </mesh>
 
           {/* Subtle calibrated ground perimeter frame */}
           <gridHelper
-            args={[GROUND_SIZE_UNITS, 12, '#33465B', '#1C2836']}
+            key={theme}
+            args={[GROUND_SIZE_UNITS, 12, palette.gridMajor, palette.gridMinor]}
             position={[0, 0.03, 0]}
           />
 
@@ -196,14 +254,14 @@ export function PropagationEnvironment({
           <mesh position={[0, feedY / 2, 0]}>
             <cylinderGeometry args={[0.07, 0.14, Math.max(0.4, feedY), 10]} />
             <meshStandardMaterial
-              color="#7B90A6"
+              color={palette.mastColor}
               metalness={0.65}
               roughness={0.35}
             />
           </mesh>
           <mesh position={[0, 0.08, 0]}>
             <boxGeometry args={[0.75, 0.16, 0.75]} />
-            <meshStandardMaterial color="#273445" roughness={0.85} />
+            <meshStandardMaterial color={palette.baseColor} roughness={0.85} />
           </mesh>
 
           {/* Urban Concrete Building Obstacle */}
@@ -212,14 +270,14 @@ export function PropagationEnvironment({
               <mesh>
                 <boxGeometry args={[2.05, obstacleHUnits, 4.16]} />
                 <meshStandardMaterial
-                  color="#263344"
+                  color={palette.buildingWall}
                   roughness={0.78}
                   metalness={0.12}
                 />
               </mesh>
               <mesh position={[0, obstacleHUnits / 2 + 0.02, 0]}>
                 <boxGeometry args={[2.1, 0.06, 4.22]} />
-                <meshStandardMaterial color="#586E87" roughness={0.5} />
+                <meshStandardMaterial color={palette.buildingCap} roughness={0.5} />
               </mesh>
             </group>
           )}
@@ -232,7 +290,7 @@ export function PropagationEnvironment({
             >
               <planeGeometry ref={ridgeGeoRef} args={[5.5, 22, 24, 36]} />
               <meshStandardMaterial
-                color="#202D3D"
+                color={palette.ridgeColor}
                 roughness={0.9}
                 flatShading
               />

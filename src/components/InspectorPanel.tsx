@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import type { Theme } from '../hooks/useTheme';
 import {
   ANTENNA_CATALOG,
   ANTENNA_LIST,
@@ -13,66 +14,92 @@ import {
   computeAntennaMetrics,
   type AntennaParams,
   type AntennaType,
+  type PropagationModel,
+  type RxProbeConfig,
   type ScaleMode,
   type ScenarioConfig,
   type SectorBeamwidthDeg,
 } from '../lib/antennaPhysics';
+import type { LinkBudgetResult } from '../lib/propagationPhysics';
+import { ExportPanel } from './ExportPanel';
+import { LinkBudgetPanel } from './LinkBudgetPanel';
 import { PolarPlot2D } from './PolarPlot2D';
 import { RangeSlider } from './RangeSlider';
 
-type TabId = 'antenna' | 'cuts' | 'environment';
+type TabId = 'antenna' | 'cuts' | 'field' | 'export';
 
 const TABS: readonly { id: TabId; label: string }[] = [
   { id: 'antenna', label: 'Antenna' },
-  { id: 'cuts', label: 'Cuts & Polar' },
-  { id: 'environment', label: 'Environment' },
+  { id: 'cuts', label: 'Cuts' },
+  { id: 'field', label: 'Field & Link' },
+  { id: 'export', label: 'Export' },
 ];
 
 interface InspectorPanelProps {
   params: AntennaParams;
   scenario: ScenarioConfig;
+  propagationModel: PropagationModel;
+  rxProbe: RxProbeConfig;
+  linkBudget: LinkBudgetResult | null;
   scaleMode: ScaleMode;
   showWireframe: boolean;
   showEPlane: boolean;
   showHPlane: boolean;
   showPolarCage: boolean;
+  theme: Theme;
+  canCaptureSnapshot: boolean;
   onChangeParams: (next: AntennaParams) => void;
   onChangeScenario: (next: ScenarioConfig) => void;
+  onChangePropagationModel: (model: PropagationModel) => void;
+  onChangeRxProbe: (next: RxProbeConfig) => void;
   onChangeScaleMode: (mode: ScaleMode) => void;
   onToggleWireframe: () => void;
   onToggleEPlane: () => void;
   onToggleHPlane: () => void;
   onTogglePolarCage: () => void;
+  onCopyShareUrl: () => Promise<boolean> | boolean;
+  onCapturePng: () => void;
   onResetDefaults: () => void;
 }
 
 export function InspectorPanel({
   params,
   scenario,
+  propagationModel,
+  rxProbe,
+  linkBudget,
   scaleMode,
   showWireframe,
   showEPlane,
   showHPlane,
   showPolarCage,
+  theme,
+  canCaptureSnapshot,
   onChangeParams,
   onChangeScenario,
+  onChangePropagationModel,
+  onChangeRxProbe,
   onChangeScaleMode,
   onToggleWireframe,
   onToggleEPlane,
   onToggleHPlane,
   onTogglePolarCage,
+  onCopyShareUrl,
+  onCapturePng,
   onResetDefaults,
 }: InspectorPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('antenna');
   const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({
     antenna: null,
     cuts: null,
-    environment: null,
+    field: null,
+    export: null,
   });
   const panelRefs = useRef<Record<TabId, HTMLDivElement | null>>({
     antenna: null,
     cuts: null,
-    environment: null,
+    field: null,
+    export: null,
   });
 
   useEffect(() => {
@@ -130,7 +157,7 @@ export function InspectorPanel({
           Antenna Radiation Lab
         </h1>
         <p className="inspector-subtitle">
-          Analytical far-field solver with E/H-plane slicing and propagation footprint
+          Analytical far-field solver, Fresnel link budget, and pattern export
         </p>
       </div>
 
@@ -451,16 +478,16 @@ export function InspectorPanel({
           </div>
         </div>
 
-        {/* TAB 3: ENVIRONMENT */}
+        {/* TAB 3: FIELD & LINK */}
         <div
           ref={(el) => {
-            panelRefs.current.environment = el;
+            panelRefs.current.field = el;
           }}
           role="tabpanel"
-          aria-labelledby="tab-environment"
-          tabIndex={activeTab === 'environment' ? 0 : undefined}
+          aria-labelledby="tab-field"
+          tabIndex={activeTab === 'field' ? 0 : undefined}
           hidden={
-            activeTab === 'environment'
+            activeTab === 'field'
               ? undefined
               : ('until-found' as unknown as boolean)
           }
@@ -491,75 +518,132 @@ export function InspectorPanel({
               </div>
             </section>
 
-            {scenario.id !== 'anechoic' && (
-              <section className="control-group" aria-labelledby="geometry-heading">
-                <h2 id="geometry-heading" className="group-heading">
-                  Tower &amp; Obstacle Geometry
-                </h2>
+            {scenario.id !== 'anechoic' ? (
+              <>
+                <section className="control-group" aria-labelledby="model-heading">
+                  <h2 id="model-heading" className="group-heading">
+                    Propagation Physics Model
+                  </h2>
+                  <div
+                    className="scale-toggle"
+                    role="group"
+                    aria-label="Ground propagation model"
+                  >
+                    <button
+                      type="button"
+                      className="choice-btn"
+                      aria-pressed={propagationModel === 'fspl'}
+                      onClick={() => onChangePropagationModel('fspl')}
+                    >
+                      Free Space (FSPL)
+                    </button>
+                    <button
+                      type="button"
+                      className="choice-btn"
+                      aria-pressed={propagationModel === 'two-ray'}
+                      onClick={() => onChangePropagationModel('two-ray')}
+                    >
+                      2-Ray Ground
+                    </button>
+                  </div>
+                </section>
 
-                <RangeSlider
-                  id="slider-tower-h"
-                  label="Tower Mast Height"
-                  value={scenario.towerHeightM}
-                  min={2}
-                  max={40}
-                  step={1}
-                  unit="m"
-                  onChange={(towerHeightM) =>
-                    onChangeScenario({ ...scenario, towerHeightM })
-                  }
+                <section className="control-group" aria-labelledby="geometry-heading">
+                  <h2 id="geometry-heading" className="group-heading">
+                    Tower &amp; Obstacle Geometry
+                  </h2>
+
+                  <RangeSlider
+                    id="slider-tower-h"
+                    label="Tower Mast Height"
+                    value={scenario.towerHeightM}
+                    min={2}
+                    max={40}
+                    step={1}
+                    unit="m"
+                    onChange={(towerHeightM) =>
+                      onChangeScenario({ ...scenario, towerHeightM })
+                    }
+                  />
+
+                  {(scenario.id === 'urban' || scenario.id === 'ridge') && (
+                    <>
+                      <RangeSlider
+                        id="slider-obs-dist"
+                        label={
+                          scenario.id === 'urban'
+                            ? 'Building Distance'
+                            : 'Ridge Crest Distance'
+                        }
+                        value={scenario.obstacleDistanceM}
+                        min={8}
+                        max={32}
+                        step={1}
+                        unit="m"
+                        onChange={(obstacleDistanceM) =>
+                          onChangeScenario({ ...scenario, obstacleDistanceM })
+                        }
+                      />
+
+                      <RangeSlider
+                        id="slider-obs-height"
+                        label={
+                          scenario.id === 'urban'
+                            ? 'Building Height'
+                            : 'Ridge Peak Height'
+                        }
+                        value={scenario.obstacleHeightM}
+                        min={4}
+                        max={26}
+                        step={1}
+                        unit="m"
+                        onChange={(obstacleHeightM) =>
+                          onChangeScenario({ ...scenario, obstacleHeightM })
+                        }
+                      />
+                    </>
+                  )}
+                </section>
+
+                <LinkBudgetPanel
+                  rxProbe={rxProbe}
+                  linkBudget={linkBudget}
+                  propagationModel={propagationModel}
+                  onChangeRxProbe={onChangeRxProbe}
                 />
-
-                {(scenario.id === 'urban' || scenario.id === 'ridge') && (
-                  <>
-                    <RangeSlider
-                      id="slider-obs-dist"
-                      label={
-                        scenario.id === 'urban'
-                          ? 'Building Distance'
-                          : 'Ridge Crest Distance'
-                      }
-                      value={scenario.obstacleDistanceM}
-                      min={8}
-                      max={32}
-                      step={1}
-                      unit="m"
-                      onChange={(obstacleDistanceM) =>
-                        onChangeScenario({ ...scenario, obstacleDistanceM })
-                      }
-                    />
-
-                    <RangeSlider
-                      id="slider-obs-height"
-                      label={
-                        scenario.id === 'urban'
-                          ? 'Building Height'
-                          : 'Ridge Peak Height'
-                      }
-                      value={scenario.obstacleHeightM}
-                      min={4}
-                      max={26}
-                      step={1}
-                      unit="m"
-                      onChange={(obstacleHeightM) =>
-                        onChangeScenario({ ...scenario, obstacleHeightM })
-                      }
-                    />
-                  </>
-                )}
-              </section>
+              </>
+            ) : (
+              <p className="topology-note">
+                Select Open Field, Urban Blockage, or Ridge Crest above to enable ground heatmaps, the interactive RX Probe, and 3D Fresnel link budgets.
+              </p>
             )}
-
-            <div className="reset-row">
-              <button
-                type="button"
-                className="btn-secondary reset-btn"
-                onClick={onResetDefaults}
-              >
-                Reset Lab Defaults
-              </button>
-            </div>
           </div>
+        </div>
+
+        {/* TAB 4: EXPORT */}
+        <div
+          ref={(el) => {
+            panelRefs.current.export = el;
+          }}
+          role="tabpanel"
+          aria-labelledby="tab-export"
+          tabIndex={activeTab === 'export' ? 0 : undefined}
+          hidden={
+            activeTab === 'export'
+              ? undefined
+              : ('until-found' as unknown as boolean)
+          }
+        >
+          <ExportPanel
+            params={params}
+            scenario={scenario}
+            scaleMode={scaleMode}
+            theme={theme}
+            canCaptureSnapshot={canCaptureSnapshot}
+            onCopyShareUrl={onCopyShareUrl}
+            onCapturePng={onCapturePng}
+            onResetDefaults={onResetDefaults}
+          />
         </div>
       </div>
     </aside>

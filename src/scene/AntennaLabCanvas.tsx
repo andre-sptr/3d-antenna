@@ -1,16 +1,22 @@
 import {
   Component,
+  useEffect,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { PolarPlot2D } from '../components/PolarPlot2D';
 import type { Theme } from '../hooks/useTheme';
-import type {
-  AntennaParams,
-  ScaleMode,
-  ScenarioConfig,
+import {
+  calculateWavelengthMeters,
+  type AntennaParams,
+  type PropagationModel,
+  type RxProbeConfig,
+  type ScaleMode,
+  type ScenarioConfig,
 } from '../lib/antennaPhysics';
+import type { LinkBudgetResult } from '../lib/propagationPhysics';
 import { AntennaModels3D } from './AntennaModels3D';
 import { CameraRig, type CameraPresetId } from './CameraRig';
 import {
@@ -18,11 +24,13 @@ import {
   PropagationEnvironment,
 } from './PropagationEnvironment';
 import { RadiationLobeMesh } from './RadiationLobeMesh';
+import { RxProbe3D } from './RxProbe3D';
 import { isWebGLAvailable } from './webglSupport';
 
 interface AntennaLabCanvasProps {
   params: AntennaParams;
   scenario: ScenarioConfig;
+  propagationModel: PropagationModel;
   scaleMode: ScaleMode;
   showWireframe: boolean;
   showEPlane: boolean;
@@ -32,6 +40,30 @@ interface AntennaLabCanvasProps {
   prefersReducedMotion: boolean;
   presetRequest: { preset: CameraPresetId; seq: number };
   theme: Theme;
+  rxProbe: RxProbeConfig;
+  linkBudget: LinkBudgetResult | null;
+  onMoveRxProbe: (xMeters: number, zMeters: number) => void;
+  snapshotCaptureRef: RefObject<(() => string | null) | null>;
+}
+
+function SnapshotBridge({
+  captureRef,
+}: {
+  captureRef: RefObject<(() => string | null) | null>;
+}) {
+  const { gl, scene, camera } = useThree();
+
+  useEffect(() => {
+    captureRef.current = () => {
+      gl.render(scene, camera);
+      return gl.domElement.toDataURL('image/png');
+    };
+    return () => {
+      captureRef.current = null;
+    };
+  }, [gl, scene, camera, captureRef]);
+
+  return null;
 }
 
 class CanvasErrorBoundary extends Component<
@@ -55,6 +87,7 @@ class CanvasErrorBoundary extends Component<
 export function AntennaLabCanvas({
   params,
   scenario,
+  propagationModel,
   scaleMode,
   showWireframe,
   showEPlane,
@@ -64,15 +97,24 @@ export function AntennaLabCanvas({
   prefersReducedMotion,
   presetRequest,
   theme,
+  rxProbe,
+  linkBudget,
+  onMoveRxProbe,
+  snapshotCaptureRef,
 }: AntennaLabCanvasProps) {
   const [webglCapable, setWebglCapable] = useState(() => isWebGLAvailable());
   const [contextLost, setContextLost] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
   const [attemptKey, setAttemptKey] = useState(0);
+  const [isDraggingProbe, setIsDraggingProbe] = useState(false);
 
   const isAnechoic = scenario.id === 'anechoic';
-  const feedY = isAnechoic ? 0 : Math.max(1.2, scenario.towerHeightM * METERS_TO_SCENE);
+  const feedY = isAnechoic
+    ? 0
+    : Math.max(1.2, scenario.towerHeightM * METERS_TO_SCENE);
   const lobeRadius = isAnechoic ? 3.4 : 2.9;
+  const wavelengthM = calculateWavelengthMeters(params.frequencyMHz);
+  const orbitEnabled = !isDraggingProbe || isAnechoic || !rxProbe.enabled;
 
   const bgColor = theme === 'dark' ? '#090D12' : '#E8ECF0';
   const fogColor = theme === 'dark' ? '#090D12' : '#E8ECF0';
@@ -140,6 +182,8 @@ export function AntennaLabCanvas({
           <directionalLight position={[10, 16, 10]} intensity={keyIntensity} color="#FFF4E5" />
           <directionalLight position={[-10, 8, -8]} intensity={fillIntensity} color="#8AC8EA" />
 
+          <SnapshotBridge captureRef={snapshotCaptureRef} />
+
           <AntennaModels3D params={params} feedY={feedY} />
 
           <RadiationLobeMesh
@@ -150,14 +194,30 @@ export function AntennaLabCanvas({
             showWireframe={showWireframe}
             showEPlane={showEPlane}
             showHPlane={showHPlane}
+            theme={theme}
           />
 
           <PropagationEnvironment
             params={params}
             scenario={scenario}
+            propagationModel={propagationModel}
             feedY={feedY}
             showPolarCage={showPolarCage}
+            theme={theme}
+            onSelectGroundPoint={onMoveRxProbe}
           />
+
+          {!isAnechoic && rxProbe.enabled && linkBudget && (
+            <RxProbe3D
+              rxProbe={rxProbe}
+              linkBudget={linkBudget}
+              feedY={feedY}
+              wavelengthM={wavelengthM}
+              theme={theme}
+              onMoveProbe={onMoveRxProbe}
+              onDragStateChange={setIsDraggingProbe}
+            />
+          )}
 
           <CameraRig
             presetRequest={presetRequest}
@@ -166,6 +226,7 @@ export function AntennaLabCanvas({
             isAnechoic={isAnechoic}
             autoOrbit={autoOrbit}
             prefersReducedMotion={prefersReducedMotion}
+            enabled={orbitEnabled}
           />
         </Canvas>
       </CanvasErrorBoundary>

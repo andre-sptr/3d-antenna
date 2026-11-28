@@ -14,6 +14,7 @@ interface CameraRigProps {
   isAnechoic: boolean;
   autoOrbit: boolean;
   prefersReducedMotion: boolean;
+  enabled?: boolean;
 }
 
 export function CameraRig({
@@ -23,6 +24,7 @@ export function CameraRig({
   isAnechoic,
   autoOrbit,
   prefersReducedMotion,
+  enabled = true,
 }: CameraRigProps) {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const { camera } = useThree();
@@ -30,35 +32,43 @@ export function CameraRig({
   const animatingRef = useRef(false);
   const desiredPosRef = useRef(new THREE.Vector3(6.2, 4.0, 6.8));
   const desiredTargetRef = useRef(new THREE.Vector3(0, 0, 0));
+  const feedYRef = useRef(feedY);
+  const azimuthRef = useRef(azimuthDeg);
 
   useEffect(() => {
-    const azRad = degToRad(azimuthDeg);
-    const lookY = isAnechoic ? 0 : feedY * 0.52;
+    feedYRef.current = feedY;
+    azimuthRef.current = azimuthDeg;
+  }, [feedY, azimuthDeg]);
+
+  useEffect(() => {
+    const azRad = degToRad(azimuthRef.current);
+    const curFeedY = feedYRef.current;
+    const lookY = isAnechoic ? 0 : curFeedY * 0.52;
     const baseDist = isAnechoic ? 8.8 : 13.8;
 
     switch (presetRequest.preset) {
       case 'top':
-        desiredPosRef.current.set(0.01, feedY + baseDist * 1.25, 0.01);
+        desiredPosRef.current.set(0.01, curFeedY + baseDist * 1.25, 0.01);
         desiredTargetRef.current.set(0, lookY, 0);
         break;
       case 'side':
-        desiredPosRef.current.set(0.8, feedY + 0.6, baseDist * 1.05);
+        desiredPosRef.current.set(0.8, curFeedY + 0.6, baseDist * 1.05);
         desiredTargetRef.current.set(isAnechoic ? 0 : 1.5, lookY, 0);
         break;
       case 'boresight':
         desiredPosRef.current.set(
           Math.cos(azRad) * baseDist * 0.95,
-          feedY + 1.4,
+          curFeedY + 1.4,
           Math.sin(azRad) * baseDist * 0.95,
         );
-        desiredTargetRef.current.set(0, feedY * 0.75, 0);
+        desiredTargetRef.current.set(0, curFeedY * 0.75, 0);
         break;
       case 'iso':
       case 'reset':
       default:
         desiredPosRef.current.set(
           baseDist * 0.68,
-          feedY + baseDist * 0.42,
+          curFeedY + baseDist * 0.42,
           baseDist * 0.74,
         );
         desiredTargetRef.current.set(isAnechoic ? 0 : 1.2, lookY, 0);
@@ -66,7 +76,7 @@ export function CameraRig({
     }
 
     animatingRef.current = true;
-  }, [presetRequest, feedY, azimuthDeg, isAnechoic]);
+  }, [presetRequest, isAnechoic]);
 
   useFrame((_state, delta) => {
     if (!animatingRef.current || !controlsRef.current) {
@@ -89,6 +99,7 @@ export function CameraRig({
     <OrbitControls
       ref={controlsRef}
       makeDefault
+      enabled={enabled}
       enableDamping
       dampingFactor={0.08}
       minDistance={2.8}

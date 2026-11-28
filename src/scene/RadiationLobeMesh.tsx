@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import type { Theme } from '../hooks/useTheme';
 import {
   dbiToRgb,
   degToRad,
@@ -18,6 +19,7 @@ interface RadiationLobeMeshProps {
   showWireframe: boolean;
   showEPlane: boolean;
   showHPlane: boolean;
+  theme: Theme;
 }
 
 const THETA_STEPS = 56;
@@ -98,6 +100,7 @@ export function RadiationLobeMesh({
   showWireframe,
   showEPlane,
   showHPlane,
+  theme,
 }: RadiationLobeMeshProps) {
   const lobeGeoRef = useRef<THREE.BufferGeometry>(null);
   const wireGeoRef = useRef<THREE.BufferGeometry>(null);
@@ -207,10 +210,10 @@ export function RadiationLobeMesh({
         <mesh>
           <bufferGeometry ref={wireGeoRef} />
           <meshBasicMaterial
-            color="#94A3B8"
+            color={theme === 'light' ? '#475569' : '#94A3B8'}
             wireframe
             transparent
-            opacity={0.22}
+            opacity={theme === 'light' ? 0.28 : 0.22}
           />
         </mesh>
       )}

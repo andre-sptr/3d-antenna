@@ -1,3 +1,24 @@
+import {
+  clampNumber,
+  computeTwoRayDeltaDbFromLengths,
+  evaluateObstacleGeometry,
+  type PropagationModel,
+  type ServiceProfileId,
+} from './propagationMath';
+
+export {
+  computeTwoRayDeltaDbFromLengths,
+  evaluateObstacleGeometry,
+  fresnelRadiusMeters,
+  knifeEdgeDiffractionLossDb,
+  texelToGroundMeters,
+  type FresnelStatus,
+  type LinkQuality,
+  type ObstacleAnalysis,
+  type PropagationModel,
+  type ServiceProfileId,
+} from './propagationMath';
+
 export const SPEED_OF_LIGHT_M_S = 299_792_458;
 
 export type AntennaType =
@@ -13,6 +34,23 @@ export type ScaleMode = 'log' | 'linear';
 export type ScenarioId = 'anechoic' | 'open-field' | 'urban' | 'ridge';
 
 export type SectorBeamwidthDeg = 65 | 90 | 120;
+
+export interface RxProbeConfig {
+  enabled: boolean;
+  xMeters: number;
+  zMeters: number;
+  rxHeightM: number;
+  rxGainDbi: number;
+  showFresnel: boolean;
+  serviceProfile: ServiceProfileId;
+}
+
+export interface ServiceProfileMeta {
+  id: ServiceProfileId;
+  label: string;
+  sensitivityDbm: number;
+  defaultRxGainDbi: number;
+}
 
 export interface AntennaParams {
   type: AntennaType;
@@ -188,11 +226,52 @@ export const DEFAULT_SCENARIO: ScenarioConfig = {
   obstacleHeightM: 14,
 };
 
+export const SERVICE_PROFILES: Record<ServiceProfileId, ServiceProfileMeta> = {
+  '5g': {
+    id: '5g',
+    label: '5G NR / LTE',
+    sensitivityDbm: -95,
+    defaultRxGainDbi: 0,
+  },
+  wifi6: {
+    id: 'wifi6',
+    label: 'Wi-Fi 6',
+    sensitivityDbm: -75,
+    defaultRxGainDbi: 2,
+  },
+  lora: {
+    id: 'lora',
+    label: 'LoRa / LPWAN',
+    sensitivityDbm: -120,
+    defaultRxGainDbi: 2,
+  },
+  ptp: {
+    id: 'ptp',
+    label: 'PtP Microwave',
+    sensitivityDbm: -70,
+    defaultRxGainDbi: 18,
+  },
+};
+
+export const SERVICE_PROFILE_LIST: readonly ServiceProfileMeta[] = [
+  SERVICE_PROFILES['5g'],
+  SERVICE_PROFILES.wifi6,
+  SERVICE_PROFILES.lora,
+  SERVICE_PROFILES.ptp,
+];
+
+export const DEFAULT_RX_PROBE: RxProbeConfig = {
+  enabled: true,
+  xMeters: 26,
+  zMeters: 0,
+  rxHeightM: 1.5,
+  rxGainDbi: 0,
+  showFresnel: true,
+  serviceProfile: '5g',
+};
+
 function clamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-  return Math.min(max, Math.max(min, value));
+  return clampNumber(value, min, max);
 }
 
 export function degToRad(deg: number): number {
@@ -250,30 +329,23 @@ export function besselJ1(x: number): number {
 }
 
 /**
- * Evaluates normalized far-field amplitude F(theta, phi) in [0, 1].
- * World frame: +Y zenith, +X east (azimuth 0 deg), +Z south (azimuth 90 deg).
+ * Evaluates normalized far-field amplitude F(u) in [0, 1] from a unit direction vector
+ * and precomputed antenna frame rotation trigonometric terms.
  */
-export function evaluatePatternLinear(
+export function evaluatePatternFromDirection(
   params: AntennaParams,
-  thetaRad: number,
-  phiRad: number,
+  ux: number,
+  uy: number,
+  uz: number,
+  cosAz: number,
+  sinAz: number,
+  cosTilt: number,
+  sinTilt: number,
 ): number {
-  const sinTheta = Math.sin(thetaRad);
-  const ux = sinTheta * Math.cos(phiRad);
-  const uy = Math.cos(thetaRad);
-  const uz = sinTheta * Math.sin(phiRad);
-
-  // Rotate world ray into antenna-local frame (undo azimuth yaw, then undo downtilt pitch)
-  const azRad = degToRad(params.azimuthDeg);
-  const cosAz = Math.cos(azRad);
-  const sinAz = Math.sin(azRad);
   const x1 = ux * cosAz + uz * sinAz;
   const z1 = -ux * sinAz + uz * cosAz;
   const y1 = uy;
 
-  const tiltRad = degToRad(params.downtiltDeg);
-  const cosTilt = Math.cos(tiltRad);
-  const sinTilt = Math.sin(tiltRad);
   const lx = x1 * cosTilt - y1 * sinTilt;
   const ly = x1 * sinTilt + y1 * cosTilt;
   const lz = z1;
@@ -370,6 +442,34 @@ export function evaluatePatternLinear(
       return clamp(Math.max(0.05, azGain * elGain), 0, 1);
     }
   }
+}
+
+/**
+ * Evaluates normalized far-field amplitude F(theta, phi) in [0, 1].
+ * World frame: +Y zenith, +X east (azimuth 0 deg), +Z south (azimuth 90 deg).
+ */
+export function evaluatePatternLinear(
+  params: AntennaParams,
+  thetaRad: number,
+  phiRad: number,
+): number {
+  const sinTheta = Math.sin(thetaRad);
+  const ux = sinTheta * Math.cos(phiRad);
+  const uy = Math.cos(thetaRad);
+  const uz = sinTheta * Math.sin(phiRad);
+
+  const azRad = degToRad(params.azimuthDeg);
+  const tiltRad = degToRad(params.downtiltDeg);
+  return evaluatePatternFromDirection(
+    params,
+    ux,
+    uy,
+    uz,
+    Math.cos(azRad),
+    Math.sin(azRad),
+    Math.cos(tiltRad),
+    Math.sin(tiltRad),
+  );
 }
 
 export function linearToRelativeDb(
@@ -512,27 +612,43 @@ export function computeAntennaMetrics(params: AntennaParams): AntennaMetrics {
 
 /**
  * Evaluates received ground signal strength (dBm) at world coordinates (xMeters, zMeters)
- * for a transmitter at (0, towerHeightM, 0) and receiver height 1.5 m.
+ * for a transmitter at (0, towerHeightM, 0) and receiver height rxHeightM (default 1.5 m).
  */
 export function evaluateGroundFieldDbm(
   params: AntennaParams,
   scenario: ScenarioConfig,
   xMeters: number,
   zMeters: number,
+  propagationModel: PropagationModel = 'fspl',
+  rxHeightM = 1.5,
 ): number {
-  const rxHeightM = 1.5;
   const dx = xMeters;
   const dy = rxHeightM - scenario.towerHeightM;
   const dz = zMeters;
+  const horizDistM = Math.hypot(dx, dz);
   const distM = Math.max(1.5, Math.hypot(dx, dy, dz));
+
+  const azRad = degToRad(params.azimuthDeg);
+  const tiltRad = degToRad(params.downtiltDeg);
+  const cosAz = Math.cos(azRad);
+  const sinAz = Math.sin(azRad);
+  const cosTilt = Math.cos(tiltRad);
+  const sinTilt = Math.sin(tiltRad);
 
   const ux = dx / distM;
   const uy = dy / distM;
   const uz = dz / distM;
 
-  const theta = Math.acos(clamp(uy, -1, 1));
-  const phi = Math.atan2(uz, ux);
-  const patternField = evaluatePatternLinear(params, theta, phi);
+  const patternField = evaluatePatternFromDirection(
+    params,
+    ux,
+    uy,
+    uz,
+    cosAz,
+    sinAz,
+    cosTilt,
+    sinTilt,
+  );
   const patternLossDb = -20 * Math.log10(Math.max(patternField, 0.004));
 
   const fsplDb =
@@ -540,55 +656,54 @@ export function evaluateGroundFieldDbm(
     20 * Math.log10(Math.max(distM / 1000, 0.0015)) +
     20 * Math.log10(params.frequencyMHz);
 
-  let obstacleLossDb = 0;
+  const wavelengthM = calculateWavelengthMeters(params.frequencyMHz);
+  const obstacle = evaluateObstacleGeometry(
+    scenario.id,
+    scenario.obstacleDistanceM,
+    scenario.obstacleHeightM,
+    wavelengthM,
+    scenario.towerHeightM,
+    xMeters,
+    zMeters,
+    rxHeightM,
+  );
 
-  if (scenario.id === 'urban') {
-    const buildingMinX = scenario.obstacleDistanceM - 3.2;
-    const buildingMaxX = scenario.obstacleDistanceM + 3.2;
-    const buildingHalfZ = 6.5;
-
-    if (dx > buildingMinX) {
-      // Check ray intersection across building face at x = buildingMinX
-      const tEnter = buildingMinX / Math.max(dx, 1e-4);
-      const tExit = Math.min(1, buildingMaxX / Math.max(dx, 1e-4));
-      if (tEnter > 0 && tEnter < 1) {
-        const zAtWall = dz * tEnter;
-        const yAtWall = scenario.towerHeightM + dy * tEnter;
-        if (Math.abs(zAtWall) <= buildingHalfZ && yAtWall < scenario.obstacleHeightM) {
-          const depthRatio = clamp((scenario.obstacleHeightM - yAtWall) / 10, 0.15, 1);
-          const edgeBlend = clamp(
-            1 - (Math.abs(zAtWall) / buildingHalfZ) * 0.25,
-            0.5,
-            1,
-          );
-          const spanScale = tExit > tEnter ? 1 : 0.7;
-          obstacleLossDb = (14 + 12 * depthRatio) * edgeBlend * spanScale;
-        }
-      }
-    }
-  } else if (scenario.id === 'ridge') {
-    const ridgeX = scenario.obstacleDistanceM;
-    if (dx > ridgeX) {
-      const tRidge = ridgeX / Math.max(dx, 1e-4);
-      if (tRidge > 0 && tRidge < 1) {
-        const zAtRidge = dz * tRidge;
-        const yAtRidge = scenario.towerHeightM + dy * tRidge;
-        const ridgeHeight =
-          scenario.obstacleHeightM * Math.exp(-(zAtRidge * zAtRidge) / 180);
-        if (yAtRidge < ridgeHeight) {
-          const blockageM = ridgeHeight - yAtRidge;
-          obstacleLossDb = clamp(6 + blockageM * 1.4, 6, 22);
-        }
-      }
-    }
+  let twoRayDeltaDb = 0;
+  if (propagationModel === 'two-ray' && !obstacle.insideBuilding && horizDistM > 0.25) {
+    const refDy = -(scenario.towerHeightM + rxHeightM);
+    const r2M = Math.max(1.5, Math.hypot(dx, refDy, dz));
+    const reflField = evaluatePatternFromDirection(
+      params,
+      dx / r2M,
+      refDy / r2M,
+      dz / r2M,
+      cosAz,
+      sinAz,
+      cosTilt,
+      sinTilt,
+    );
+    const shadowScale = obstacle.diffractionLossDb > 6 ? 0.25 : 1;
+    const reflectedRatio =
+      (Math.max(reflField, 0.004) / Math.max(patternField, 0.004)) * shadowScale;
+    twoRayDeltaDb = computeTwoRayDeltaDbFromLengths(
+      distM,
+      r2M,
+      scenario.towerHeightM,
+      rxHeightM,
+      horizDistM,
+      wavelengthM,
+      reflectedRatio,
+    );
   }
 
   return (
     params.txPowerDbm +
     params.gainDbi -
     patternLossDb -
-    fsplDb -
-    obstacleLossDb
+    fsplDb +
+    twoRayDeltaDb -
+    obstacle.diffractionLossDb -
+    obstacle.penetrationLossDb
   );
 }
 
